@@ -9,8 +9,10 @@ from deepsearcher.utils import log
 from deepsearcher.vector_db import RetrievalResult
 from deepsearcher.vector_db.base import BaseVectorDB, deduplicate_results
 
-SUB_QUERY_PROMPT = """To answer this question more comprehensively, please break down the original question into up to four sub-questions. Return as list of str.
-If this is a very simple question and no decomposition is necessary, then keep the only one original question in the python code list.
+SUB_QUERY_PROMPT = """In order to answer this question more comprehensively, please break down the original question into at most four sub-questions. 
+I hope you will not simply split the original question directly, but after summarizing the original question, get at most four sub-questions related to the direction of the original question.
+These sub-questions can cover the core elements of the original question very well, and each sub-question has the value of independent exploration.Also, sub-questions should be general and not too detailed.
+Return as list of str.If this is a very simple question and no decomposition is necessary, then keep the only one original question in the python code list.
 
 Original Question: {original_query}
 
@@ -21,9 +23,10 @@ Example input:
 
 Example output:
 [
-    "What is deep learning?",
-    "What is the difference between deep learning and machine learning?",
-    "What is the history of deep learning?"
+    "What is deep learning and what are its core principles?",
+    "How does deep learning compare to other machine learning approaches?",
+    "What are the main types of deep learning models and their general applications?",
+    "What are the key advantages and challenges of deep learning?",
 ]
 </EXAMPLE>
 
@@ -53,7 +56,68 @@ Related Chunks:
 Respond exclusively in valid List of str format without any other text."""
 
 
-SUMMARY_PROMPT = """You are a AI content analysis expert, good at summarizing content. Please summarize a specific and detailed answer or report based on the previous queries and the retrieved document chunks.
+SUMMARY_PROMPT = """As an AI content analysis expert, you are tasked with producing a sophisticated academic synthesis that meets the highest standards of scholarly composition while allowing intellectual content to dictate structure.
+And this synthesis needs to be based on the previous queries and the retrieved document chunks.
+
+Composition Standards:
+1. Language and Style:
+   - Employ formal academic register with precise terminology
+   - Construct complex, well-balanced sentences
+   - Maintain coherent narrative flow through:
+     * Strategic paragraph transitions
+     * Clear thematic progression
+     * Logical connectors between ideas
+   - Develop arguments through full paragraphs rather than fragmented lists
+
+2. Structural Framework:
+   - Begin with contextual foundation and analytical focus
+   - Build through evidence-integrated paragraphs with:
+     * Explicit topic sentences
+     * Supported claims
+     * Critical analysis
+   - Conclude only when substantive synthesis emerges naturally
+
+3. Formatting Requirements:
+\\documentclass {{article}}
+\\usepackage[utf8]{{inputenc}}
+\\usepackage{{booktabs}}
+\\usepackage{{parskip}}
+\\setlength{{\\parindent}}{{0pt}}
+\\setlength{{\\parskip}}{{1em}}
+
+\\begin{{document}}
+
+[Content begins with academic prose...]
+
+\\end{{document}}
+
+4. Analytical Methodology:
+   - Interrogate relationships between sources
+   - Identify conceptual patterns
+   - Resolve apparent contradictions
+   - Highlight significant omissions
+   - Maintain objective critical distance
+
+Composition Constraints:
+1. Absolutely prohibited:
+   - Bullet points or numbered lists
+   - Informal diction or contractions
+   - Unsupported assertions
+   - Mechanical template adherence
+
+2. Strongly discouraged:
+   - Overuse of sectional divisions
+   - Redundant summary statements
+   - Excessive direct quotation
+
+Produce an intellectually rigorous analysis where:
+- Structure serves argument rather than formula
+- Depth of insight prevails over superficial coverage
+- Academic integrity governs all interpretations
+- Technical precision matches conceptual sophistication
+
+Compose your report adhering strictly to these specifications, ensuring the final product reads as continuous, scholarly prose suitable for academic publication. 
+Develop each point thoroughly within structured paragraphs, using transitional devices to create logical progression between ideas.
 
 Original Query: {question}
 
@@ -61,12 +125,12 @@ Previous Sub Queries: {mini_questions}
 
 Related Chunks: 
 {mini_chunk_str}
-
 """
 
 
 @describe_class(
-    "This agent is suitable for handling general and simple queries, such as given a topic and then writing a report, survey, or article."
+    "This agent is suitable for handling open-ended, general, or summary-style questions, especially those requiring content generation such as writing reports, surveys, or articles. "
+    "It is also able to retrieve and integrate information from large text collections to provide synthesized responses."
 )
 class DeepSearch(RAGAgent):
     """
@@ -114,7 +178,7 @@ class DeepSearch(RAGAgent):
                 {"role": "user", "content": SUB_QUERY_PROMPT.format(original_query=original_query)}
             ]
         )
-        response_content = self.llm.remove_think(chat_response.content)
+        response_content = chat_response.content
         return self.llm.literal_eval(response_content), chat_response.total_tokens
 
     async def _search_chunks_from_vectordb(self, query: str, sub_queries: List[str]):
@@ -133,7 +197,7 @@ class DeepSearch(RAGAgent):
         for collection in selected_collections:
             log.color_print(f"<search> Search [{query}] in [{collection}]...  </search>\n")
             retrieved_results = self.vector_db.search_data(
-                collection=collection, vector=query_vector, query_text=query
+                collection=collection, vector=query_vector
             )
             if not retrieved_results or len(retrieved_results) == 0:
                 log.color_print(
@@ -155,7 +219,11 @@ class DeepSearch(RAGAgent):
                     ]
                 )
                 consume_tokens += chat_response.total_tokens
-                response_content = self.llm.remove_think(chat_response.content).strip()
+                response_content = chat_response.content.strip()
+                # strip the reasoning text if exists
+                if "<think>" in response_content and "</think>" in response_content:
+                    end_of_think = response_content.find("</think>") + len("</think>")
+                    response_content = response_content[end_of_think:].strip()
                 if "YES" in response_content and "NO" not in response_content:
                     all_retrieved_results.append(retrieved_result)
                     accepted_chunk_num += 1
@@ -181,7 +249,7 @@ class DeepSearch(RAGAgent):
             else "NO RELATED CHUNKS FOUND.",
         )
         chat_response = self.llm.chat([{"role": "user", "content": reflect_prompt}])
-        response_content = self.llm.remove_think(chat_response.content)
+        response_content = chat_response.content
         return self.llm.literal_eval(response_content), chat_response.total_tokens
 
     def retrieve(self, original_query: str, **kwargs) -> Tuple[List[RetrievalResult], int, dict]:
@@ -305,9 +373,9 @@ class DeepSearch(RAGAgent):
         )
         chat_response = self.llm.chat([{"role": "user", "content": summary_prompt}])
         log.color_print("\n==== FINAL ANSWER====\n")
-        log.color_print(self.llm.remove_think(chat_response.content))
+        log.color_print(chat_response.content)
         return (
-            self.llm.remove_think(chat_response.content),
+            chat_response.content,
             all_retrieved_results,
             n_token_retrieval + chat_response.total_tokens,
         )
