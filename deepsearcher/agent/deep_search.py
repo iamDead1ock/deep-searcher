@@ -11,6 +11,61 @@ from deepsearcher.utils import log
 from deepsearcher.vector_db import RetrievalResult
 from deepsearcher.vector_db.base import BaseVectorDB, deduplicate_results
 
+CONTENT_ARCHITECTURE_PROMPT = """As an expert content strategist, analyze the query and retrieved information to create an optimal content architecture plan.
+
+Query: {query}
+Sub-queries: {sub_queries}
+Available Information Summary: {info_summary}
+
+Based on the query type and available information, design a structured content architecture that includes:
+
+1. Content Type Classification: Identify if this is:
+   - Comparative analysis
+   - Causal relationship analysis  
+   - Historical development review
+   - Technical explanation
+   - Policy analysis
+   - Other (specify)
+
+2. Logical Structure Plan: Design the optimal organization pattern:
+   - Sequential (chronological/step-by-step)
+   - Categorical (thematic grouping)
+   - Hierarchical (general to specific)
+   - Comparative (side-by-side analysis)
+   - Problem-solution framework
+   - Other (specify)
+
+3. Content Outline: Create a detailed content outline with:
+   - Main sections and their logical flow
+   - Key points for each section
+   - Evidence allocation strategy
+   - Transition strategies between sections
+
+4. Quality Standards: Define specific quality criteria for this content type:
+   - Required depth of analysis
+   - Evidence standards
+   - Critical thinking requirements
+   - Professional terminology usage
+
+Return your response in the following JSON format:
+{{
+    "content_type": "string",
+    "structure_pattern": "string", 
+    "outline": [
+        {{
+            "section": "string",
+            "key_points": ["string"],
+            "evidence_strategy": "string"
+        }}
+    ],
+    "quality_criteria": {{
+        "analysis_depth": "string",
+        "evidence_requirements": "string",
+        "critical_thinking": "string"
+    }}
+}}
+"""
+
 SUB_QUERY_PROMPT = """In order to answer this question more comprehensively, please break down the original question into at most four sub-questions. 
 I hope you will not simply split the original question directly, but after summarizing the original question, get at most four sub-questions related to the direction of the original question.
 These sub-questions can cover the core elements of the original question very well, and each sub-question has the value of independent exploration.Also, sub-questions should be general and not too detailed.
@@ -58,28 +113,59 @@ Related Chunks:
 Respond exclusively in valid List of str format without any other text."""
 
 
-SUMMARY_PROMPT = """As an AI content analysis expert, you are tasked with producing a sophisticated academic synthesis that meets the highest standards of scholarly composition while allowing intellectual content to dictate structure.
-And this synthesis needs to be based on the previous queries and the retrieved document chunks.
+SUMMARY_PROMPT = """You are an expert academic writer tasked with creating a sophisticated synthesis based on the provided content architecture and retrieved information.
 
-Composition Standards:
-1. Language and Style:
-   - Employ formal academic register with precise terminology
-   - Construct complex, well-balanced sentences
-   - Maintain coherent narrative flow through:
-     * Strategic paragraph transitions
-     * Clear thematic progression
-     * Logical connectors between ideas
-   - Develop arguments through full paragraphs rather than fragmented lists
+Content Architecture Plan:{architecture_plan}
 
-2. Structural Framework:
-   - Begin with contextual foundation and analytical focus
-   - Build through evidence-integrated paragraphs with:
-     * Explicit topic sentences
-     * Supported claims
-     * Critical analysis
-   - Conclude only when substantive synthesis emerges naturally
+Writing Context:
+- Original Query: {question}
+- Sub-queries Explored: {mini_questions}
+- Content Type: {content_type}
+- Structure Pattern: {structure_pattern}
 
-3. Formatting Requirements:
+Quality Standards for This Content:
+- Analysis Depth: {analysis_depth}
+- Evidence Requirements: {evidence_requirements}
+- Critical Thinking: {critical_thinking}
+
+Source Materials:
+{mini_chunk_str}
+
+Detailed Writing Instructions:
+1. Role-Specific Expertise: 
+Write as a leading expert in the relevant field with deep knowledge and analytical capabilities.
+
+2. Structure Implementation:
+    - Follow the provided outline structure precisely
+   - Ensure logical flow between sections as planned
+   - Implement the specified evidence allocation strategy
+
+3. Analysis Requirements:
+   - Go beyond information summarization to provide deep analytical insights  
+   - Identify patterns, relationships, and implications not explicitly stated in sources
+   - Present critical evaluation of different perspectives where applicable
+   - Draw meaningful conclusions based on evidence synthesis
+
+4.Evidence Integration：
+   - Seamlessly weave evidence into argumentative flow
+   - Prioritize high-quality, credible sources
+   - Address potential counterarguments or limitations
+   - Maintain clear traceability between claims and evidence
+   
+5.Language and Style Excellence：
+   - Use precise, field-appropriate terminology consistently
+   - Employ sophisticated academic discourse
+   - Create smooth transitions that guide reader understanding
+   - Vary sentence structure for engaging readability
+   
+6.Critical Thinking Demonstration：
+   - Question assumptions and examine multiple perspectives
+   - Identify cause-effect relationships and their implications
+   - Highlight areas of uncertainty or ongoing debate
+   - Suggest future research directions or practical applications
+
+Output Format Requirements：
+
 \\documentclass {{article}}
 \\usepackage[utf8]{{inputenc}}
 \\usepackage{{booktabs}}
@@ -89,44 +175,59 @@ Composition Standards:
 
 \\begin{{document}}
 
-[Summarize a title based on content.And content begins with academic prose...]
+\\title{{[Generate an insightful title that captures the analytical focus]}}
+\\author{{AI Research Synthesis}}
+\\date{{\\today}}
+\\maketitle
+
+[Begin with your sophisticated academic analysis following the architecture plan...]
 
 \\end{{document}}
 
-4. Analytical Methodology:
-   - Interrogate relationships between sources
-   - Identify conceptual patterns
-   - Resolve apparent contradictions
-   - Highlight significant omissions
-   - Maintain objective critical distance
+Remember: 
+This should read as an authoritative, insightful analysis that demonstrates expertise beyond simple information compilation. Focus on providing value through analytical depth and critical evaluation.
+"""
 
-Composition Constraints:
-1. Absolutely prohibited:
-   - Bullet points or numbered lists
-   - Informal diction or contractions
-   - Unsupported assertions
-   - Mechanical template adherence
+QUERY_TYPE_ANALYSIS_PROMPT = """Analyze the following query to determine its type and complexity characteristics:
 
-2. Strongly discouraged:
-   - Overuse of sectional divisions
-   - Redundant summary statements
-   - Excessive direct quotation
+Query: {query}
 
-Produce an intellectually rigorous analysis where:
-- Structure serves argument rather than formula
-- Depth of insight prevails over superficial coverage
-- Academic integrity governs all interpretations
-- Technical precision matches conceptual sophistication
+Classify this query across the following dimensions:
 
-Compose your report adhering strictly to these specifications, ensuring the final product reads as continuous, scholarly prose suitable for academic publication. 
-Develop each point thoroughly within structured paragraphs, using transitional devices to create logical progression between ideas.
+1. Primary Intent:
+   - Information seeking (what/who/when/where)
+   - Analysis seeking (why/how/implications)
+   - Comparison seeking (differences/similarities)
+   - Synthesis seeking (comprehensive overview)
+   - Problem-solving seeking (solutions/recommendations)
 
-Original Query: {question}
+2. Domain Complexity:
+   - Single domain focus
+   - Multi-domain integration required
+   - Cross-disciplinary analysis needed
 
-Previous Sub Queries: {mini_questions}
+3. Temporal Dimension:
+   - Historical focus
+   - Current state analysis
+   - Future-oriented/predictive
+   - Longitudinal development
 
-Related Chunks: 
-{mini_chunk_str}
+4. Cognitive Demand:
+   - Factual recall
+   - Conceptual understanding
+   - Analytical reasoning
+   - Creative synthesis
+   - Critical evaluation
+
+Return as JSON:
+{{
+    "primary_intent": "string",
+    "domain_complexity": "string", 
+    "temporal_dimension": "string",
+    "cognitive_demand": "string",
+    "complexity_score": 1-10,
+    "recommended_approach": "string"
+}}
 """
 
 
@@ -173,6 +274,63 @@ class DeepSearch(RAGAgent):
             llm=self.llm, vector_db=self.vector_db, dim=embedding_model.dimension
         )
         self.text_window_splitter = text_window_splitter
+
+    def _analyze_query_characteristics(self, query: str) -> Tuple[dict, int]:
+        """Analyze query characteristics to provide a basis for content architecture planning"""
+        chat_response = self.llm.chat(
+            messages=[{"role": "user", "content": QUERY_TYPE_ANALYSIS_PROMPT.format(query=query)}]
+        )
+        response_content = chat_response.content
+        return self.llm.literal_eval(response_content), chat_response.total_tokens
+
+    def _plan_content_architecture(self, query: str, sub_queries: List[str], chunks: List[RetrievalResult]) -> Tuple[
+        dict, int]:
+        """Intelligent content architecture planning"""
+        info_summary = self._generate_info_summary([chunk.text for chunk in chunks[:10]])  # 使用前10个chunk生成摘要
+
+        chat_response = self.llm.chat(
+            messages=[{
+                "role": "user",
+                "content": CONTENT_ARCHITECTURE_PROMPT.format(
+                    query=query,
+                    sub_queries=sub_queries,
+                    info_summary=info_summary
+                )
+            }]
+        )
+        response_content = chat_response.content
+        return self.llm.literal_eval(response_content), chat_response.total_tokens
+
+    def _generate_info_summary(self, chunk_texts: List[str]) -> str:
+        """Generate information summaries for architecture planning"""
+        if not chunk_texts:
+            return "No information available."
+
+        sample_texts = chunk_texts[:5]
+        combined_text = " ".join(sample_texts)
+
+        if len(combined_text) > 1000:
+            combined_text = combined_text[:1000] + "..."
+
+        return f"Available information covers: {combined_text}"
+
+    def _apply_role_based_prompting(self, base_prompt: str, query_characteristics: dict) -> str:
+        """Apply role-based prompts based on query characteristics"""
+        domain_complexity = query_characteristics.get("domain_complexity", "single")
+        cognitive_demand = query_characteristics.get("cognitive_demand", "factual")
+
+        if "multi-domain" in domain_complexity.lower():
+            role_prefix = "As an interdisciplinary research expert with deep knowledge across multiple fields, "
+        elif "cross-disciplinary" in domain_complexity.lower():
+            role_prefix = "As a cross-disciplinary scholar specializing in connecting insights across different domains, "
+        elif cognitive_demand in ["analytical reasoning", "critical evaluation"]:
+            role_prefix = "As a senior analytical researcher with expertise in critical evaluation and complex reasoning, "
+        elif cognitive_demand == "creative synthesis":
+            role_prefix = "As an expert synthesis researcher skilled in creative integration of diverse information sources, "
+        else:
+            role_prefix = "As a domain expert with comprehensive knowledge and analytical capabilities, "
+
+        return role_prefix + base_prompt
 
     def _generate_sub_queries(self, original_query: str) -> Tuple[List[str], int]:
         chat_response = self.llm.chat(
@@ -376,7 +534,7 @@ class DeepSearch(RAGAgent):
                     f"<think> New search queries for next iteration: {sub_gap_queries} </think>\n"
                 )
                 all_sub_queries.extend(sub_gap_queries)
-                all_sub_queries = deduplicate_results(all_sub_queries, key_func=lambda x: x)
+                all_sub_queries = list(dict.fromkeys(all_sub_queries))
 
         additional_info = {
             "all_sub_queries": all_sub_queries,
@@ -427,6 +585,18 @@ class DeepSearch(RAGAgent):
         if not all_retrieved_results or len(all_retrieved_results) == 0:
             return f"No relevant information found for query '{query}'.", [], n_token_retrieval
         all_sub_queries = additional_info["all_sub_queries"]
+        total_tokens = n_token_retrieval
+
+        query_characteristics, tokens_analysis = self._analyze_query_characteristics(query)
+        total_tokens += tokens_analysis
+        log.color_print(f"<think> Query characteristics: {query_characteristics} </think>\n")
+
+        architecture_plan, tokens_architecture = self._plan_content_architecture(
+            query, all_sub_queries, all_retrieved_results
+        )
+        total_tokens += tokens_architecture
+        log.color_print(
+            f"<think> Content architecture planned: {architecture_plan.get('structure_pattern', 'undefined')} </think>\n")
 
         chunk_texts = []
         for chunk in all_retrieved_results:
@@ -439,11 +609,19 @@ class DeepSearch(RAGAgent):
             f"<think> Summarize answer from all {len(all_retrieved_results)} retrieved chunks with session context... </think>\n"
         )
 
-        enhanced_summary_prompt = SUMMARY_PROMPT.format(
+        summary_prompt = SUMMARY_PROMPT.format(
+            architecture_plan=architecture_plan,
             question=query,
             mini_questions=all_sub_queries,
+            content_type=architecture_plan.get("content_type", "analysis"),
+            structure_pattern=architecture_plan.get("structure_pattern", "hierarchical"),
+            analysis_depth=architecture_plan.get("quality_criteria", {}).get("analysis_depth", "comprehensive"),
+            evidence_requirements=architecture_plan.get("quality_criteria", {}).get("evidence_requirements", "multiple sources"),
+            critical_thinking=architecture_plan.get("quality_criteria", {}).get("critical_thinking", "required"),
             mini_chunk_str=self._format_chunk_texts(chunk_texts),
         )
+
+        enhanced_summary_prompt = self._apply_role_based_prompting(summary_prompt, query_characteristics)
 
         chat_response = self.llm.chat([{"role": "user", "content": enhanced_summary_prompt}])
         log.color_print("\n==== FINAL ANSWER====\n")
@@ -452,7 +630,7 @@ class DeepSearch(RAGAgent):
         return (
             chat_response.content,
             all_retrieved_results,
-            n_token_retrieval + chat_response.total_tokens,
+            total_tokens + chat_response.total_tokens,
         )
 
     def _format_chunk_texts(self, chunk_texts: List[str]) -> str:
